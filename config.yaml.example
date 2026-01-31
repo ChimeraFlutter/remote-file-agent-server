@@ -1,0 +1,23 @@
+server:
+  host: "0.0.0.0"
+  port: 18120
+  admin_password: "Acewill2025"
+  agent_enroll_token: "your-secret-token-here-change-me"
+
+storage:
+  objects_dir: "./data/objects"
+  db_path: "./data/meta.sqlite"
+  max_file_size_gb: 10
+
+security:
+  session_timeout_minutes: 60
+  download_token_timeout_minutes: 10
+
+websocket:
+  ping_interval_seconds: 10
+  pong_timeout_seconds: 30
+  heartbeat_interval_seconds: 15
+
+logging:
+  level: "info"
+  output: "stdout"

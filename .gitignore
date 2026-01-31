@@ -1,0 +1,19 @@
+# Dart/Flutter
+.dart_tool/
+.packages
+build/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# macOS
+.DS_Store
+
+# Data
+data/
+
+# Binary
+server
+*.exe

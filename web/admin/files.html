@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文件浏览器 - Remote File Manager</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+        }
+
+        .header {
+            background: white;
+            padding: 20px 40px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 24px;
+        }
+
+        .device-info {
+            color: #666;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+        }
+
+        .btn-secondary {
+            background: #e0e0e0;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #d0d0d0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+
+        .breadcrumb {
+            background: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .breadcrumb-item {
+            color: #667eea;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .breadcrumb-item:hover {
+            text-decoration: underline;
+        }
+
+        .breadcrumb-separator {
+            color: #999;
+        }
+
+        .breadcrumb-current {
+            color: #333;
+        }
+
+        .files-section {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .section-header {
+            padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .section-header h2 {
+            color: #333;
+            font-size: 20px;
+        }
+
+        .file-list {
+            padding: 0;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 15px 20px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .file-item:hover {
+            background: #f8f8f8;
+        }
+
+        .file-item:last-child {
+            border-bottom: none;
+        }
+
+        .file-icon {
+            width: 40px;
+            height: 40px;
+            margin-right: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+
+        .file-info {
+            flex: 1;
+        }
+
+        .file-name {
+            font-size: 15px;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .file-meta {
+            font-size: 13px;
+            color: #888;
+        }
+
+        .file-actions {
+            display: flex;
+            gap: 8px;
+            margin-left: 10px;
+        }
+
+        .file-actions .btn {
+            padding: 6px 12px;
+            font-size: 12px;
+            border-radius: 4px;
+        }
+
+        .btn-compress {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-compress:hover {
+            background: #5568d3;
+        }
+
+        .btn-upload {
+            background: #4caf50;
+            color: white;
+        }
+
+        .btn-upload:hover {
+            background: #45a049;
+        }
+
+        .btn-delete {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-delete:hover {
+            background: #d32f2f;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+
+        .error {
+            background: #ffebee;
+            color: #c33;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #888;
+        }
+
+        /* Context Menu */
+        .context-menu {
+            position: fixed;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            padding: 8px 0;
+            min-width: 200px;
+            z-index: 1000;
+            display: none;
+        }
+
+        .context-menu-item {
+            padding: 10px 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: background 0.2s;
+        }
+
+        .context-menu-item:hover {
+            background: #f5f5f5;
+        }
+
+        .context-menu-item-icon {
+            font-size: 16px;
+            width: 20px;
+        }
+
+        .context-menu-divider {
+            height: 1px;
+            background: #e0e0e0;
+            margin: 4px 0;
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h3 {
+            font-size: 20px;
+            color: #333;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #999;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-close:hover {
+            color: #333;
+        }
+
+        .modal-body {
+            margin-bottom: 20px;
+        }
+
+        .download-link-container {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 14px;
+        }
+
+        .modal-footer {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        /* Progress Dialog */
+        .progress-container {
+            margin: 20px 0;
+        }
+
+        .progress-bar-wrapper {
+            background: #e0e0e0;
+            border-radius: 10px;
+            height: 20px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-bar {
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            height: 100%;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+            color: #666;
+            margin-top: 10px;
+        }
+
+        .btn-success {
+            background: #4caf50;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>文件浏览器</h1>
+            <div class="device-info" id="device-info">加载中...</div>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-secondary" onclick="goBack()">返回设备列表</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="breadcrumb" id="breadcrumb">
+            <span class="breadcrumb-current">加载中...</span>
+        </div>
+
+        <div class="files-section">
+            <div class="section-header">
+                <h2>文件列表</h2>
+            </div>
+            <div id="file-list" class="file-list">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Context Menu -->
+    <div id="context-menu" class="context-menu">
+        <div class="context-menu-item" onclick="handleContextAction('compress')">
+            <span class="context-menu-item-icon">📦</span>
+            <span>压缩并上传</span>
+        </div>
+        <div class="context-menu-item" onclick="handleContextAction('upload')">
+            <span class="context-menu-item-icon">⬆️</span>
+            <span>上传并获取下载链接</span>
+        </div>
+    </div>
+
+    <!-- Download Link Modal -->
+    <div id="download-link-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>下载链接</h3>
+                <button class="modal-close" onclick="closeModal('download-link-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>文件已成功上传！您可以使用以下链接下载：</p>
+                <div class="download-link-container" id="download-link-text"></div>
+                <p style="color: #888; font-size: 13px; margin-top: 10px;">
+                    ⏰ 此链接将在 10 分钟后过期
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('download-link-modal')">关闭</button>
+                <button class="btn btn-success" onclick="copyDownloadLink()">复制链接</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Upload Progress Modal -->
+    <div id="upload-progress-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>上传进度</h3>
+            </div>
+            <div class="modal-body">
+                <div class="progress-container">
+                    <div id="upload-status-text">正在准备上传...</div>
+                    <div class="progress-bar-wrapper">
+                        <div id="upload-progress-bar" class="progress-bar" style="width: 0%">0%</div>
+                    </div>
+                    <div class="progress-info">
+                        <span id="upload-speed">速度: 0 KB/s</span>
+                        <span id="upload-size">0 MB / 0 MB</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let deviceId = '';
+        let deviceName = '';
+        let currentPath = '';
+        let pathHistory = [];
+        let contextMenuTarget = null;
+        let currentDownloadLink = '';
+        let ws = null;
+
+        // Load device info and files on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            // Get device ID from URL
+            const params = new URLSearchParams(window.location.search);
+            deviceId = params.get('device_id');
+            deviceName = params.get('device_name') || deviceId;
+
+            if (!deviceId) {
+                showError('缺少设备 ID');
+                return;
+            }
+
+            // Update device info
+            document.getElementById('device-info').textContent = `设备: ${deviceName}`;
+
+            // Connect to WebSocket for real-time updates
+            connectWebSocket();
+
+            // Load root directories
+            loadRootDirectories();
+
+            // Close context menu when clicking outside
+            document.addEventListener('click', () => {
+                hideContextMenu();
+            });
+
+            // Prevent default context menu
+            document.addEventListener('contextmenu', (e) => {
+                if (e.target.closest('.file-item')) {
+                    e.preventDefault();
+                }
+            });
+        });
+
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/admin`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleWebSocketMessage(data);
+                } catch (e) {
+                    console.error('Failed to parse WebSocket message:', e);
+                }
+            };
+
+            ws.onclose = () => {
+                // Reconnect after 3 seconds
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+
+        function handleWebSocketMessage(data) {
+            if (data.type === 'device_update' && data.device && data.device.device_id === deviceId) {
+                if (data.event === 'updated') {
+                    // Update device name
+                    deviceName = data.device.device_name;
+                    document.getElementById('device-info').textContent = `设备: ${deviceName}`;
+                } else if (data.event === 'disconnected') {
+                    // Device disconnected, show warning
+                    showError('设备已断开连接');
+                }
+            }
+        }
+
+        async function loadRootDirectories() {
+            try {
+                const response = await fetch('/api/devices', {
+                    credentials: 'include'
+                });
+
+                if (response.status === 401) {
+                    window.location.href = '/admin/login.html';
+                    return;
+                }
+
+                if (!response.ok) {
+                    throw new Error('Failed to load device info');
+                }
+
+                const devices = await response.json();
+                const device = devices.find(d => d.device_id === deviceId);
+
+                if (!device) {
+                    showError('设备不存在');
+                    return;
+                }
+
+                if (device.status !== 'online') {
+                    showError('设备离线');
+                    return;
+                }
+
+                // Show root directories
+                renderRootDirectories(device.allowed_roots || []);
+            } catch (error) {
+                showError('加载设备信息失败：' + error.message);
+            }
+        }
+
+        function renderRootDirectories(roots) {
+            const container = document.getElementById('file-list');
+            const breadcrumb = document.getElementById('breadcrumb');
+
+            breadcrumb.innerHTML = '<span class="breadcrumb-current">根目录</span>';
+
+            if (roots.length === 0) {
+                container.innerHTML = '<div class="empty-state">该设备没有配置白名单目录</div>';
+                return;
+            }
+
+            container.innerHTML = roots.map(root => `
+                <div class="file-item"
+                     data-path="${escapeHtml(root.abs_path)}"
+                     data-name="${escapeHtml(root.name)}"
+                     data-is-dir="true"
+                     data-size="0">
+                    <div class="file-icon" onclick="openDirectory('${escapeHtml(root.abs_path)}', '${escapeHtml(root.name)}')">📁</div>
+                    <div class="file-info" onclick="openDirectory('${escapeHtml(root.abs_path)}', '${escapeHtml(root.name)}')">
+                        <div class="file-name">${escapeHtml(root.name)}</div>
+                        <div class="file-meta">${escapeHtml(root.abs_path)}</div>
+                    </div>
+                    <div class="file-actions">
+                        <button class="btn btn-compress" onclick="event.stopPropagation(); compressAndUpload({path: '${escapeHtml(root.abs_path)}', name: '${escapeHtml(root.name)}', isDir: true})">📦 压缩上传</button>
+                        <button class="btn btn-delete" onclick="event.stopPropagation(); deleteFile({path: '${escapeHtml(root.abs_path)}', name: '${escapeHtml(root.name)}', isDir: true})">🗑️ 删除</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function openDirectory(path, name) {
+            currentPath = path;
+            pathHistory.push({ path, name });
+
+            try {
+                const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/rpc`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        method: 'list',
+                        payload: { path: path }
+                    })
+                });
+
+                if (response.status === 401) {
+                    window.location.href = '/admin/login.html';
+                    return;
+                }
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'RPC 调用失败');
+                }
+
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error?.message || 'RPC 调用失败');
+                }
+
+                // Parse payload
+                const payload = typeof result.payload === 'string' 
+                    ? JSON.parse(result.payload) 
+                    : result.payload;
+
+                renderFiles(payload.entries || []);
+                updateBreadcrumb();
+            } catch (error) {
+                showError('加载文件列表失败：' + error.message);
+                pathHistory.pop();
+            }
+        }
+
+        function renderFiles(entries) {
+            const container = document.getElementById('file-list');
+
+            if (entries.length === 0) {
+                container.innerHTML = '<div class="empty-state">该目录为空</div>';
+                return;
+            }
+
+            // Sort: directories first, then files
+            entries.sort((a, b) => {
+                if (a.is_dir && !b.is_dir) return -1;
+                if (!a.is_dir && b.is_dir) return 1;
+                return a.name.localeCompare(b.name);
+            });
+
+            container.innerHTML = entries.map(entry => {
+                const escapedPath = escapeHtml(entry.path);
+                const escapedName = escapeHtml(entry.name);
+                const isDir = entry.is_dir;
+
+                // 根据文件类型显示不同的按钮
+                const actionButtons = isDir ? `
+                    <button class="btn btn-compress" onclick="event.stopPropagation(); compressAndUpload({path: '${escapedPath}', name: '${escapedName}', isDir: true})">📦 压缩上传</button>
+                    <button class="btn btn-delete" onclick="event.stopPropagation(); deleteFile({path: '${escapedPath}', name: '${escapedName}', isDir: true})">🗑️ 删除</button>
+                ` : `
+                    <button class="btn btn-upload" onclick="event.stopPropagation(); uploadAndGetLink({path: '${escapedPath}', name: '${escapedName}', isDir: false})">⬆️ 上传</button>
+                    <button class="btn btn-delete" onclick="event.stopPropagation(); deleteFile({path: '${escapedPath}', name: '${escapedName}', isDir: false})">🗑️ 删除</button>
+                `;
+
+                return `
+                <div class="file-item"
+                     data-path="${escapedPath}"
+                     data-name="${escapedName}"
+                     data-is-dir="${isDir}"
+                     data-size="${entry.size || 0}">
+                    <div class="file-icon" ${isDir ? `onclick="openDirectory('${escapedPath}', '${escapedName}')"` : ''}>${isDir ? '📁' : '📄'}</div>
+                    <div class="file-info" ${isDir ? `onclick="openDirectory('${escapedPath}', '${escapedName}')"` : ''}>
+                        <div class="file-name">${escapedName}</div>
+                        <div class="file-meta">
+                            ${isDir ? '文件夹' : formatSize(entry.size)}
+                            · ${formatTime(entry.modified_time)}
+                        </div>
+                    </div>
+                    <div class="file-actions">
+                        ${actionButtons}
+                    </div>
+                </div>
+            `}).join('');
+        }
+
+        function updateBreadcrumb() {
+            const breadcrumb = document.getElementById('breadcrumb');
+            
+            let html = '<a class="breadcrumb-item" onclick="goToRoot()">根目录</a>';
+            
+            for (let i = 0; i < pathHistory.length; i++) {
+                const item = pathHistory[i];
+                html += '<span class="breadcrumb-separator">/</span>';
+                
+                if (i === pathHistory.length - 1) {
+                    html += `<span class="breadcrumb-current">${escapeHtml(item.name)}</span>`;
+                } else {
+                    html += `<a class="breadcrumb-item" onclick="goToPath(${i})">${escapeHtml(item.name)}</a>`;
+                }
+            }
+            
+            breadcrumb.innerHTML = html;
+        }
+
+        function goToRoot() {
+            pathHistory = [];
+            currentPath = '';
+            loadRootDirectories();
+        }
+
+        function goToPath(index) {
+            const item = pathHistory[index];
+            pathHistory = pathHistory.slice(0, index + 1);
+            openDirectory(item.path, item.name);
+        }
+
+        function goBack() {
+            window.location.href = '/admin/devices.html';
+        }
+
+        function formatSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        function formatTime(timestamp) {
+            const date = new Date(timestamp * 1000);
+            return date.toLocaleString('zh-CN');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showError(message) {
+            const container = document.getElementById('file-list');
+            container.innerHTML = `<div class="error">${escapeHtml(message)}</div>`;
+        }
+
+        // Context Menu Functions
+        function showContextMenuFromElement(event, element) {
+            event.preventDefault();
+            event.stopPropagation();
+            
+            const target = {
+                path: element.dataset.path,
+                name: element.dataset.name,
+                isDir: element.dataset.isDir === 'true',
+                size: parseInt(element.dataset.size) || 0
+            };
+            
+            showContextMenu(event, target);
+        }
+
+        function showContextMenu(event, target) {
+            event.preventDefault();
+            event.stopPropagation();
+            
+            contextMenuTarget = target;
+            const menu = document.getElementById('context-menu');
+            
+            // Update menu items based on target type
+            if (target.isDir) {
+                menu.innerHTML = `
+                    <div class="context-menu-item" onclick="handleContextAction('compress')">
+                        <span class="context-menu-item-icon">📦</span>
+                        <span>压缩并上传</span>
+                    </div>
+                    <div class="context-menu-divider"></div>
+                    <div class="context-menu-item" onclick="handleContextAction('delete')">
+                        <span class="context-menu-item-icon">🗑️</span>
+                        <span>删除</span>
+                    </div>
+                `;
+            } else {
+                menu.innerHTML = `
+                    <div class="context-menu-item" onclick="handleContextAction('upload')">
+                        <span class="context-menu-item-icon">⬆️</span>
+                        <span>上传并获取下载链接</span>
+                    </div>
+                    <div class="context-menu-divider"></div>
+                    <div class="context-menu-item" onclick="handleContextAction('delete')">
+                        <span class="context-menu-item-icon">🗑️</span>
+                        <span>删除</span>
+                    </div>
+                `;
+            }
+            
+            // Position menu at cursor
+            menu.style.left = event.pageX + 'px';
+            menu.style.top = event.pageY + 'px';
+            menu.style.display = 'block';
+        }
+
+        function hideContextMenu() {
+            const menu = document.getElementById('context-menu');
+            menu.style.display = 'none';
+        }
+
+        async function handleContextAction(action) {
+            hideContextMenu();
+            
+            if (!contextMenuTarget) return;
+            
+            if (action === 'compress') {
+                await compressAndUpload(contextMenuTarget);
+            } else if (action === 'upload') {
+                await uploadAndGetLink(contextMenuTarget);
+            } else if (action === 'delete') {
+                await deleteFile(contextMenuTarget);
+            }
+        }
+
+        async function deleteFile(target) {
+            const confirmMsg = target.isDir 
+                ? `确定要删除文件夹 "${target.name}" 吗？此操作不可恢复！`
+                : `确定要删除文件 "${target.name}" 吗？此操作不可恢复！`;
+            
+            if (!confirm(confirmMsg)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/rpc`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        method: 'delete',
+                        payload: { path: target.path }
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('删除请求失败');
+                }
+
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.error?.message || '删除失败');
+                }
+
+                alert('删除成功！');
+                
+                // 刷新当前目录
+                if (pathHistory.length > 0) {
+                    const current = pathHistory[pathHistory.length - 1];
+                    pathHistory.pop();
+                    await openDirectory(current.path, current.name);
+                } else {
+                    loadRootDirectories();
+                }
+            } catch (error) {
+                alert('删除失败：' + error.message);
+            }
+        }
+
+        async function compressAndUpload(target) {
+            showModal('upload-progress-modal');
+            updateProgress(0, '正在压缩文件夹...');
+            
+            try {
+                // Step 1: Request compression
+                const compressResponse = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/rpc`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        method: 'compress',
+                        payload: { path: target.path }
+                    })
+                });
+
+                if (!compressResponse.ok) {
+                    throw new Error('压缩失败');
+                }
+
+                const compressResult = await compressResponse.json();
+                if (!compressResult.success) {
+                    throw new Error(compressResult.error?.message || '压缩失败');
+                }
+
+                const payload = typeof compressResult.payload === 'string' 
+                    ? JSON.parse(compressResult.payload) 
+                    : compressResult.payload;
+
+                updateProgress(50, '压缩完成，正在上传...');
+
+                // Step 2: Upload compressed file with cleanup flag
+                await uploadFileWithCleanup(payload.zip_path, payload.zip_name, true);
+                
+            } catch (error) {
+                closeModal('upload-progress-modal');
+                alert('压缩并上传失败：' + error.message);
+            }
+        }
+
+        async function uploadAndGetLink(target) {
+            showModal('upload-progress-modal');
+            updateProgress(0, '正在准备上传...');
+            
+            try {
+                await uploadFileWithCleanup(target.path, target.name, false);
+            } catch (error) {
+                closeModal('upload-progress-modal');
+                alert('上传失败：' + error.message);
+            }
+        }
+
+        async function uploadFileWithCleanup(filePath, fileName, cleanupAfter) {
+            updateProgress(5, '正在从设备读取文件...');
+            
+            // Request file upload from agent
+            const uploadResponse = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/rpc`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({
+                    method: 'upload',
+                    payload: { 
+                        path: filePath,
+                        cleanup_after: cleanupAfter
+                    }
+                })
+            });
+
+            if (!uploadResponse.ok) {
+                throw new Error('上传请求失败');
+            }
+
+            updateProgress(20, '正在接收文件数据...');
+
+            const uploadResult = await uploadResponse.json();
+            if (!uploadResult.success) {
+                throw new Error(uploadResult.error?.message || '上传失败');
+            }
+
+            const payload = typeof uploadResult.payload === 'string' 
+                ? JSON.parse(uploadResult.payload) 
+                : uploadResult.payload;
+
+            updateProgress(40, '正在初始化服务器上传...', 0, payload.size);
+
+            // Step 1: Initialize upload on server
+            const initResponse = await fetch('/api/objects/init', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({
+                    device_id: deviceId,
+                    source_path: filePath,
+                    file_name: payload.name,
+                    file_size: payload.size,
+                    sha256: payload.sha256
+                })
+            });
+
+            if (!initResponse.ok) {
+                throw new Error('初始化上传失败');
+            }
+
+            const initResult = await initResponse.json();
+            const objectId = initResult.object_id;
+
+            updateProgress(50, '正在上传文件到服务器...', 0, payload.size);
+
+            // Step 2: Upload file data (decode base64 and upload as binary)
+            const fileData = atob(payload.data);
+            const fileBytes = new Uint8Array(fileData.length);
+            for (let i = 0; i < fileData.length; i++) {
+                fileBytes[i] = fileData.charCodeAt(i);
+            }
+
+            updateProgress(60, '正在传输文件数据...', payload.size * 0.5, payload.size);
+
+            const uploadDataResponse = await fetch(`/upload/${objectId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/octet-stream' },
+                credentials: 'include',
+                body: fileBytes
+            });
+
+            if (!uploadDataResponse.ok) {
+                throw new Error('上传文件数据失败');
+            }
+
+            updateProgress(85, '验证文件完整性...', payload.size, payload.size);
+
+            // Step 3: Generate download token
+            const tokenResponse = await fetch(`/api/objects/${objectId}/token`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include'
+            });
+
+            if (!tokenResponse.ok) {
+                throw new Error('获取下载链接失败');
+            }
+
+            const tokenResult = await tokenResponse.json();
+            const downloadUrl = tokenResult.download_url;
+            
+            updateProgress(100, '上传完成！', payload.size, payload.size);
+            
+            // 延迟一下让用户看到100%
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            closeModal('upload-progress-modal');
+            showDownloadLink(downloadUrl);
+        }
+
+        function updateProgress(percent, statusText, uploaded = 0, total = 0) {
+            const progressBar = document.getElementById('upload-progress-bar');
+            const statusTextEl = document.getElementById('upload-status-text');
+            const sizeEl = document.getElementById('upload-size');
+            
+            progressBar.style.width = percent + '%';
+            progressBar.textContent = Math.round(percent) + '%';
+            statusTextEl.textContent = statusText;
+            
+            if (total > 0) {
+                sizeEl.textContent = `${formatSize(uploaded)} / ${formatSize(total)}`;
+            }
+        }
+
+        function showDownloadLink(url) {
+            currentDownloadLink = url;
+            document.getElementById('download-link-text').textContent = url;
+            showModal('download-link-modal');
+        }
+
+        function copyDownloadLink() {
+            navigator.clipboard.writeText(currentDownloadLink).then(() => {
+                alert('链接已复制到剪贴板！');
+            }).catch(() => {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = currentDownloadLink;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                alert('链接已复制到剪贴板！');
+            });
+        }
+
+        function showModal(modalId) {
+            document.getElementById(modalId).classList.add('show');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('show');
+        }
+    </script>
+</body>
+</html>

@@ -1,8 +1,8 @@
 server:
   host: "0.0.0.0"
   port: 18120
-  admin_password: "Acewill2025"
-  agent_enroll_token: "your-secret-token-here-change-me"
+  admin_password: "change-me-to-your-password"
+  agent_enroll_token: "change-me-to-your-token"
 
 storage:
   objects_dir: "./data/objects"

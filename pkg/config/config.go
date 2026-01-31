@@ -117,7 +117,7 @@ func setDefaults() {
 	// Server defaults
 	viper.SetDefault("server.host", "0.0.0.0")
 	viper.SetDefault("server.port", 18120)
-	viper.SetDefault("server.admin_password", "Acewill2025")
+	viper.SetDefault("server.admin_password", "")
 	viper.SetDefault("server.agent_enroll_token", "")
 
 	// Storage defaults

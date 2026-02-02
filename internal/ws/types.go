@@ -22,6 +22,8 @@ const (
 	MsgTypeCompressResp MessageType = "compress_resp"
 	MsgTypeUploadReq    MessageType = "upload_req"
 	MsgTypeUploadResp   MessageType = "upload_resp"
+	MsgTypeFileInfoReq  MessageType = "file_info_req"
+	MsgTypeFileInfoResp MessageType = "file_info_resp"
 	MsgTypeProgress     MessageType = "progress"
 	MsgTypeHeartbeat    MessageType = "heartbeat"
 	MsgTypeError        MessageType = "error"
@@ -86,3 +88,9 @@ const (
 	ErrDeleteFailed            ErrorCode = "DELETE_FAILED"
 	ErrInternalError           ErrorCode = "INTERNAL_ERROR"
 )
+
+// AdminNotifier is an interface for notifying admin clients
+type AdminNotifier interface {
+	BroadcastDeviceUpdate(device *devices.Device, event string)
+	BroadcastProgress(envelope *Envelope)
+}

@@ -439,7 +439,8 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeModal('download-link-modal')">关闭</button>
-                <button class="btn btn-success" onclick="copyDownloadLink()">复制链接</button>
+                <button class="btn btn-primary" onclick="downloadFile()">⬇️ 下载</button>
+                <button class="btn btn-success" onclick="copyDownloadLink()">📋 复制链接</button>
             </div>
         </div>
     </div>
@@ -475,7 +476,7 @@
         let ws = null;
 
         // Load device info and files on page load
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             // Get device ID from URL
             const params = new URLSearchParams(window.location.search);
             deviceId = params.get('device_id');
@@ -483,6 +484,16 @@
 
             if (!deviceId) {
                 showError('缺少设备 ID');
+                return;
+            }
+
+            // Check authentication first
+            const authCheck = await fetch('/api/admin/devices', {
+                credentials: 'include'
+            });
+
+            if (authCheck.status === 401) {
+                window.location.href = '/admin/login.html';
                 return;
             }
 
@@ -539,12 +550,70 @@
                     // Device disconnected, show warning
                     showError('设备已断开连接');
                 }
+            } else if (data.type === 'upload_progress') {
+                // Handle real-time upload progress
+                handleUploadProgress(data.progress);
+            }
+        }
+
+        function handleUploadProgress(progress) {
+            // Check if this progress is for current device
+            if (progress.device_id !== deviceId) {
+                return;
+            }
+
+            const payload = progress.payload;
+            if (typeof payload === 'string') {
+                payload = JSON.parse(payload);
+            }
+
+            const percent = payload.percent || 0;
+            const uploadedBytes = payload.uploaded_bytes || 0;
+            const totalBytes = payload.total_bytes || 0;
+            const status = payload.status || 'Uploading';
+
+            // Calculate upload speed (if we have previous data)
+            const now = Date.now();
+            if (window.lastProgressUpdate) {
+                const timeDiff = (now - window.lastProgressUpdate.time) / 1000; // seconds
+                const bytesDiff = uploadedBytes - window.lastProgressUpdate.bytes;
+                const speed = bytesDiff / timeDiff; // bytes per second
+
+                // Update progress with real data
+                updateProgress(
+                    percent,
+                    status === 'Upload complete' ? '上传完成！' : '正在上传...',
+                    uploadedBytes,
+                    totalBytes
+                );
+
+                // Update speed display
+                const speedEl = document.getElementById('upload-speed');
+                if (speedEl && speed > 0) {
+                    speedEl.textContent = `速度: ${formatSpeed(speed)}`;
+                }
+            }
+
+            // Store current progress for speed calculation
+            window.lastProgressUpdate = {
+                time: now,
+                bytes: uploadedBytes
+            };
+        }
+
+        function formatSpeed(bytesPerSecond) {
+            if (bytesPerSecond < 1024) {
+                return Math.round(bytesPerSecond) + ' B/s';
+            } else if (bytesPerSecond < 1024 * 1024) {
+                return (bytesPerSecond / 1024).toFixed(2) + ' KB/s';
+            } else {
+                return (bytesPerSecond / (1024 * 1024)).toFixed(2) + ' MB/s';
             }
         }
 
         async function loadRootDirectories() {
             try {
-                const response = await fetch('/api/devices', {
+                const response = await fetch('/api/admin/devices', {
                     credentials: 'include'
                 });
 
@@ -612,7 +681,7 @@
             pathHistory.push({ path, name });
 
             try {
-                const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/rpc`, {
+                const response = await fetch(`/api/admin/devices/${encodeURIComponent(deviceId)}/rpc`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -846,7 +915,7 @@
             }
 
             try {
-                const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/rpc`, {
+                const response = await fetch(`/api/admin/devices/${encodeURIComponent(deviceId)}/rpc`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'include',
@@ -886,7 +955,7 @@
             
             try {
                 // Step 1: Request compression
-                const compressResponse = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/rpc`, {
+                const compressResponse = await fetch(`/api/admin/devices/${encodeURIComponent(deviceId)}/rpc`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'include',
@@ -933,50 +1002,48 @@
         }
 
         async function uploadFileWithCleanup(filePath, fileName, cleanupAfter) {
-            updateProgress(5, '正在从设备读取文件...');
-            
-            // Request file upload from agent
-            const uploadResponse = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/rpc`, {
+            // Reset progress tracking
+            window.lastProgressUpdate = null;
+
+            updateProgress(5, '正在准备上传...');
+
+            // Step 1: Get file info from agent (without file data)
+            const infoResponse = await fetch(`/api/admin/devices/${encodeURIComponent(deviceId)}/rpc`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
                 body: JSON.stringify({
-                    method: 'upload',
-                    payload: { 
-                        path: filePath,
-                        cleanup_after: cleanupAfter
-                    }
+                    method: 'file_info',
+                    payload: { path: filePath }
                 })
             });
 
-            if (!uploadResponse.ok) {
-                throw new Error('上传请求失败');
+            if (!infoResponse.ok) {
+                throw new Error('获取文件信息失败');
             }
 
-            updateProgress(20, '正在接收文件数据...');
-
-            const uploadResult = await uploadResponse.json();
-            if (!uploadResult.success) {
-                throw new Error(uploadResult.error?.message || '上传失败');
+            const infoResult = await infoResponse.json();
+            if (!infoResult.success) {
+                throw new Error(infoResult.error?.message || '获取文件信息失败');
             }
 
-            const payload = typeof uploadResult.payload === 'string' 
-                ? JSON.parse(uploadResult.payload) 
-                : uploadResult.payload;
+            const fileInfo = typeof infoResult.payload === 'string'
+                ? JSON.parse(infoResult.payload)
+                : infoResult.payload;
 
-            updateProgress(40, '正在初始化服务器上传...', 0, payload.size);
+            updateProgress(10, '正在初始化服务器上传...', 0, fileInfo.size);
 
-            // Step 1: Initialize upload on server
-            const initResponse = await fetch('/api/objects/init', {
+            // Step 2: Initialize upload on server
+            const initResponse = await fetch('/api/objects/upload/init', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
                 body: JSON.stringify({
                     device_id: deviceId,
                     source_path: filePath,
-                    file_name: payload.name,
-                    file_size: payload.size,
-                    sha256: payload.sha256
+                    file_name: fileInfo.name,
+                    file_size: fileInfo.size,
+                    sha256: fileInfo.sha256
                 })
             });
 
@@ -986,33 +1053,39 @@
 
             const initResult = await initResponse.json();
             const objectId = initResult.object_id;
+            const uploadUrl = `${window.location.protocol}//${window.location.host}/api/objects/upload/${objectId}`;
 
-            updateProgress(50, '正在上传文件到服务器...', 0, payload.size);
+            updateProgress(15, '正在通知设备开始上传...', 0, fileInfo.size);
 
-            // Step 2: Upload file data (decode base64 and upload as binary)
-            const fileData = atob(payload.data);
-            const fileBytes = new Uint8Array(fileData.length);
-            for (let i = 0; i < fileData.length; i++) {
-                fileBytes[i] = fileData.charCodeAt(i);
-            }
-
-            updateProgress(60, '正在传输文件数据...', payload.size * 0.5, payload.size);
-
-            const uploadDataResponse = await fetch(`/upload/${objectId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/octet-stream' },
+            // Step 3: Tell agent to upload directly to server via HTTP
+            // Progress will be reported via WebSocket in real-time
+            const uploadResponse = await fetch(`/api/admin/devices/${encodeURIComponent(deviceId)}/rpc`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
-                body: fileBytes
+                body: JSON.stringify({
+                    method: 'upload',
+                    payload: {
+                        path: filePath,
+                        upload_url: uploadUrl,
+                        cleanup_after: cleanupAfter
+                    }
+                })
             });
 
-            if (!uploadDataResponse.ok) {
-                throw new Error('上传文件数据失败');
+            if (!uploadResponse.ok) {
+                throw new Error('上传请求失败');
             }
 
-            updateProgress(85, '验证文件完整性...', payload.size, payload.size);
+            const uploadResult = await uploadResponse.json();
+            if (!uploadResult.success) {
+                throw new Error(uploadResult.error?.message || '上传失败');
+            }
 
-            // Step 3: Generate download token
-            const tokenResponse = await fetch(`/api/objects/${objectId}/token`, {
+            updateProgress(95, '正在生成下载链接...', fileInfo.size, fileInfo.size);
+
+            // Step 4: Generate download token
+            const tokenResponse = await fetch(`/api/objects/${objectId}/download-token`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include'
@@ -1024,12 +1097,12 @@
 
             const tokenResult = await tokenResponse.json();
             const downloadUrl = tokenResult.download_url;
-            
-            updateProgress(100, '上传完成！', payload.size, payload.size);
-            
+
+            updateProgress(100, '上传完成！', fileInfo.size, fileInfo.size);
+
             // 延迟一下让用户看到100%
             await new Promise(resolve => setTimeout(resolve, 500));
-            
+
             closeModal('upload-progress-modal');
             showDownloadLink(downloadUrl);
         }
@@ -1055,18 +1128,60 @@
         }
 
         function copyDownloadLink() {
-            navigator.clipboard.writeText(currentDownloadLink).then(() => {
-                alert('链接已复制到剪贴板！');
-            }).catch(() => {
-                // Fallback for older browsers
+            if (!currentDownloadLink) {
+                alert('错误：没有可复制的链接');
+                return;
+            }
+
+            // Try modern clipboard API first (requires HTTPS or localhost)
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(currentDownloadLink).then(() => {
+                    alert('✅ 链接已复制到剪贴板！');
+                }).catch((err) => {
+                    console.error('Clipboard API failed:', err);
+                    fallbackCopy();
+                });
+            } else {
+                // Use fallback method for HTTP sites
+                fallbackCopy();
+            }
+        }
+
+        function fallbackCopy() {
+            try {
                 const textArea = document.createElement('textarea');
                 textArea.value = currentDownloadLink;
+                textArea.style.position = 'fixed';
+                textArea.style.left = '-999999px';
+                textArea.style.top = '-999999px';
                 document.body.appendChild(textArea);
+                textArea.focus();
                 textArea.select();
-                document.execCommand('copy');
+
+                const successful = document.execCommand('copy');
                 document.body.removeChild(textArea);
-                alert('链接已复制到剪贴板！');
-            });
+
+                if (successful) {
+                    alert('✅ 链接已复制到剪贴板！');
+                } else {
+                    // If all else fails, show the link for manual copy
+                    prompt('请手动复制以下链接：', currentDownloadLink);
+                }
+            } catch (err) {
+                console.error('Fallback copy failed:', err);
+                // Last resort: show in prompt dialog
+                prompt('请手动复制以下链接：', currentDownloadLink);
+            }
+        }
+
+        function downloadFile() {
+            // Create a temporary link and trigger download
+            const link = document.createElement('a');
+            link.href = currentDownloadLink;
+            link.download = ''; // Let the server set the filename
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         }
 
         function showModal(modalId) {

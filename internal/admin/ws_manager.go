@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/remote-file-manager/server/internal/devices"
+	"github.com/remote-file-manager/server/internal/ws"
 )
 
 var adminUpgrader = websocket.Upgrader{
@@ -156,6 +157,25 @@ func (m *AdminWSManager) BroadcastDeviceList() {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		log.Printf("Failed to marshal device list: %v", err)
+		return
+	}
+
+	select {
+	case m.broadcast <- data:
+	default:
+	}
+}
+
+// BroadcastProgress broadcasts upload progress to all admin connections
+func (m *AdminWSManager) BroadcastProgress(envelope *ws.Envelope) {
+	msg := map[string]interface{}{
+		"type":     "upload_progress",
+		"progress": envelope,
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		log.Printf("Failed to marshal progress: %v", err)
 		return
 	}
 

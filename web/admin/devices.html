@@ -299,8 +299,32 @@
 
         // Load devices on page load
         document.addEventListener('DOMContentLoaded', () => {
+            // Check authentication first
+            checkAuth();
             connectWebSocket();
         });
+
+        async function checkAuth() {
+            try {
+                const response = await fetch('/api/admin/devices', {
+                    credentials: 'include'
+                });
+
+                if (response.status === 401) {
+                    window.location.href = '/admin/login.html';
+                    return;
+                }
+
+                // Load initial device list
+                if (response.ok) {
+                    devices = await response.json();
+                    renderDevices();
+                    updateStats();
+                }
+            } catch (error) {
+                console.error('Auth check failed:', error);
+            }
+        }
 
         function connectWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -374,7 +398,7 @@
 
         async function loadDevices() {
             try {
-                const response = await fetch('/api/devices', {
+                const response = await fetch('/api/admin/devices', {
                     credentials: 'include'
                 });
 
@@ -470,7 +494,7 @@
 
         async function logout() {
             try {
-                await fetch('/admin/logout', {
+                await fetch('/api/admin/logout', {
                     method: 'POST',
                     credentials: 'include'
                 });

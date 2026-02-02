@@ -271,3 +271,72 @@ func (s *Storage) EnsureStorageDir(objectID string) error {
 	dir := filepath.Dir(filepath.Join(s.objectsDir, storagePath))
 	return os.MkdirAll(dir, 0755)
 }
+
+// SetObjectExpiration sets the expiration time for an object
+func (s *Storage) SetObjectExpiration(objectID string, expiresAt time.Time) error {
+	query := `UPDATE uploaded_objects SET expires_at = ? WHERE object_id = ?`
+	_, err := s.db.Exec(query, expiresAt, objectID)
+	if err != nil {
+		return fmt.Errorf("failed to set object expiration: %w", err)
+	}
+
+	s.logger.Debug("Object expiration set",
+		zap.String("object_id", objectID),
+		zap.Time("expires_at", expiresAt))
+
+	return nil
+}
+
+// CleanupExpiredObjects deletes expired objects and their files
+func (s *Storage) CleanupExpiredObjects() error {
+	// Find expired objects
+	query := `
+		SELECT object_id, storage_path
+		FROM uploaded_objects
+		WHERE expires_at IS NOT NULL AND expires_at < ?
+	`
+
+	rows, err := s.db.Query(query, time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to query expired objects: %w", err)
+	}
+	defer rows.Close()
+
+	var deletedCount int
+	for rows.Next() {
+		var objectID, storagePath string
+		if err := rows.Scan(&objectID, &storagePath); err != nil {
+			s.logger.Error("Failed to scan expired object", zap.Error(err))
+			continue
+		}
+
+		// Delete file
+		if storagePath != "" {
+			fullPath := filepath.Join(s.objectsDir, storagePath)
+			if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+				s.logger.Warn("Failed to delete expired object file",
+					zap.String("object_id", objectID),
+					zap.String("path", fullPath),
+					zap.Error(err))
+			}
+		}
+
+		// Delete from database
+		deleteQuery := `DELETE FROM uploaded_objects WHERE object_id = ?`
+		if _, err := s.db.Exec(deleteQuery, objectID); err != nil {
+			s.logger.Error("Failed to delete expired object from database",
+				zap.String("object_id", objectID),
+				zap.Error(err))
+			continue
+		}
+
+		deletedCount++
+		s.logger.Debug("Expired object deleted", zap.String("object_id", objectID))
+	}
+
+	if deletedCount > 0 {
+		s.logger.Info("Cleaned up expired objects", zap.Int("count", deletedCount))
+	}
+
+	return nil
+}

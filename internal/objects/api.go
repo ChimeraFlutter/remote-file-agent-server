@@ -202,8 +202,19 @@ func (api *API) HandleGenerateDownloadToken(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Generate download URL
-	downloadURL := fmt.Sprintf("%s/download/%s", api.serverURL, token.Token)
+	// Set object expiration to match token expiration
+	if err := api.storage.SetObjectExpiration(objectID, token.ExpiresAt); err != nil {
+		api.logger.Error("Failed to set object expiration", zap.Error(err))
+		// Don't fail the request, just log the error
+	}
+
+	// Generate download URL using request host
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	host := r.Host
+	downloadURL := fmt.Sprintf("%s://%s/api/objects/download/%s", scheme, host, token.Token)
 
 	// Log audit
 	api.auditor.Log("admin", "generate_token", obj.DeviceID, objectID, "success", "", r.RemoteAddr)

@@ -23,6 +23,7 @@ const (
 	pingPeriod = (pongWait * 9) / 10
 
 	// Maximum message size allowed from peer
+	// Keep at 10MB - large files should use HTTP upload
 	maxMessageSize = 10 * 1024 * 1024 // 10MB
 )
 
@@ -50,8 +51,8 @@ type Manager struct {
 	connections    map[string]*Connection // deviceID -> connection
 	mu             sync.RWMutex
 	enrollToken    string
-	rpcManager     interface{} // Will be set later to avoid circular dependency
-	adminNotifier  interface{} // Admin WebSocket manager for notifications
+	rpcManager     interface{}    // Will be set later to avoid circular dependency
+	adminNotifier  AdminNotifier  // Admin WebSocket manager for notifications
 }
 
 // NewManager creates a new WebSocket manager
@@ -64,7 +65,7 @@ func NewManager(registry *devices.Registry, enrollToken string) *Manager {
 }
 
 // SetAdminNotifier sets the admin WebSocket manager for notifications
-func (m *Manager) SetAdminNotifier(notifier interface{}) {
+func (m *Manager) SetAdminNotifier(notifier AdminNotifier) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.adminNotifier = notifier
@@ -189,8 +190,10 @@ func (c *Connection) handleMessage(envelope *Envelope) error {
 		return c.handleHello(envelope)
 	case MsgTypeHeartbeat:
 		return c.handleHeartbeat(envelope)
-	case MsgTypeListResp, MsgTypeDeleteResp, MsgTypeZipResp, MsgTypeCompressResp, MsgTypeUploadResp:
+	case MsgTypeListResp, MsgTypeDeleteResp, MsgTypeZipResp, MsgTypeCompressResp, MsgTypeUploadResp, MsgTypeFileInfoResp:
 		return c.handleRPCResponse(envelope)
+	case MsgTypeProgress:
+		return c.handleProgress(envelope)
 	case MsgTypeError:
 		return c.handleErrorResponse(envelope)
 	default:
@@ -354,6 +357,42 @@ func (c *Connection) handleErrorResponse(envelope *Envelope) error {
 
 	// Handle response
 	return mgr.HandleResponse(envelope.ReqID, resp)
+}
+
+// handleProgress handles progress messages from agents
+func (c *Connection) handleProgress(envelope *Envelope) error {
+	// Forward progress message to admin clients
+	if c.manager.adminNotifier != nil {
+		// Add device_id to the payload for admin clients
+		var progressData map[string]interface{}
+		if err := json.Unmarshal(envelope.Payload, &progressData); err != nil {
+			log.Printf("Failed to parse progress payload: %v", err)
+			return nil
+		}
+
+		progressData["device_id"] = c.deviceID
+
+		// Re-marshal with device_id
+		updatedPayload, err := json.Marshal(progressData)
+		if err != nil {
+			log.Printf("Failed to marshal progress payload: %v", err)
+			return nil
+		}
+
+		// Create new envelope with updated payload
+		progressEnvelope := Envelope{
+			Type:      MsgTypeProgress,
+			ReqID:     envelope.ReqID,
+			Timestamp: envelope.Timestamp,
+			DeviceID:  c.deviceID,
+			Payload:   updatedPayload,
+		}
+
+		// Broadcast to admin clients
+		c.manager.adminNotifier.BroadcastProgress(&progressEnvelope)
+	}
+
+	return nil
 }
 
 // sendHelloAck sends a hello_ack message

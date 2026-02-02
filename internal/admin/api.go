@@ -208,12 +208,27 @@ func (api *API) HandleDeviceRPC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set timeout based on operation type
+	timeout := 30 * time.Second
+	switch req.Method {
+	case "upload", "compress":
+		// Large file operations need more time
+		timeout = 5 * time.Minute
+	case "list", "file_info":
+		// Directory listing and file info should be fast
+		timeout = 10 * time.Second
+	case "delete":
+		timeout = 30 * time.Second
+	default:
+		timeout = 30 * time.Second
+	}
+
 	// Create context with timeout
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
 	// Call RPC
-	resp, err := api.rpcManager.Call(ctx, deviceID, req.Method, req.Payload, 30*time.Second)
+	resp, err := api.rpcManager.Call(ctx, deviceID, req.Method, req.Payload, timeout)
 	if err != nil {
 		api.logger.Error("RPC call failed",
 			zap.String("device_id", deviceID),

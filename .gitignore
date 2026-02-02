@@ -7,12 +7,16 @@ build/
 .idea/
 *.iml
 .vscode/
+.claude/
 
 # macOS
 .DS_Store
 
 # Data
 data/
+
+# Config
+config.yaml
 
 # Binary
 server

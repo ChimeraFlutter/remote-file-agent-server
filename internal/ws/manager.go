@@ -344,7 +344,17 @@ func (c *Connection) handleErrorResponse(envelope *Envelope) error {
 		log.Printf("Failed to parse error payload: %v", err)
 	}
 
-	log.Printf("Received error from device %s: %s - %s", c.deviceID, errorPayload.Code, errorPayload.Message)
+	// Also parse as generic map to get additional fields like path
+	var payloadMap map[string]interface{}
+	if err := json.Unmarshal(envelope.Payload, &payloadMap); err == nil {
+		if path, ok := payloadMap["path"].(string); ok {
+			log.Printf("Received error from device %s: %s - %s (Path: %s)", c.deviceID, errorPayload.Code, errorPayload.Message, path)
+		} else {
+			log.Printf("Received error from device %s: %s - %s", c.deviceID, errorPayload.Code, errorPayload.Message)
+		}
+	} else {
+		log.Printf("Received error from device %s: %s - %s", c.deviceID, errorPayload.Code, errorPayload.Message)
+	}
 
 	// Create error response object
 	resp := map[string]interface{}{

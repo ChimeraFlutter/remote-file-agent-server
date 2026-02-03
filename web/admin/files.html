@@ -663,14 +663,14 @@
                      data-name="${escapeHtml(root.name)}"
                      data-is-dir="true"
                      data-size="0">
-                    <div class="file-icon" onclick="openDirectory('${escapeHtml(root.abs_path)}', '${escapeHtml(root.name)}')">📁</div>
-                    <div class="file-info" onclick="openDirectory('${escapeHtml(root.abs_path)}', '${escapeHtml(root.name)}')">
+                    <div class="file-icon" onclick="openDirectory('${escapeJs(root.abs_path)}', '${escapeJs(root.name)}')">📁</div>
+                    <div class="file-info" onclick="openDirectory('${escapeJs(root.abs_path)}', '${escapeJs(root.name)}')">>
                         <div class="file-name">${escapeHtml(root.name)}</div>
                         <div class="file-meta">${escapeHtml(root.abs_path)}</div>
                     </div>
                     <div class="file-actions">
-                        <button class="btn btn-compress" onclick="event.stopPropagation(); compressAndUpload({path: '${escapeHtml(root.abs_path)}', name: '${escapeHtml(root.name)}', isDir: true})">📦 压缩上传</button>
-                        <button class="btn btn-delete" onclick="event.stopPropagation(); deleteFile({path: '${escapeHtml(root.abs_path)}', name: '${escapeHtml(root.name)}', isDir: true})">🗑️ 删除</button>
+                        <button class="btn btn-compress" onclick="event.stopPropagation(); compressAndUpload({path: '${escapeJs(root.abs_path)}', name: '${escapeJs(root.name)}', isDir: true})">📦 压缩上传</button>
+                        <button class="btn btn-delete" onclick="event.stopPropagation(); deleteFile({path: '${escapeJs(root.abs_path)}', name: '${escapeJs(root.name)}', isDir: true})">🗑️删除</button>
                     </div>
                 </div>
             `).join('');
@@ -739,16 +739,18 @@
 
             container.innerHTML = entries.map(entry => {
                 const escapedPath = escapeHtml(entry.path);
+                const escapedPathJs = escapeJs(entry.path);  // For onclick attributes
                 const escapedName = escapeHtml(entry.name);
+                const escapedNameJs = escapeJs(entry.name);  // For onclick attributes
                 const isDir = entry.is_dir;
 
                 // 根据文件类型显示不同的按钮
                 const actionButtons = isDir ? `
-                    <button class="btn btn-compress" onclick="event.stopPropagation(); compressAndUpload({path: '${escapedPath}', name: '${escapedName}', isDir: true})">📦 压缩上传</button>
-                    <button class="btn btn-delete" onclick="event.stopPropagation(); deleteFile({path: '${escapedPath}', name: '${escapedName}', isDir: true})">🗑️ 删除</button>
+                    <button class="btn btn-compress" onclick="event.stopPropagation(); compressAndUpload({path: '${escapedPathJs}', name: '${escapedNameJs}', isDir: true})">📦 压缩上传</button>
+                    <button class="btn btn-delete" onclick="event.stopPropagation(); deleteFile({path: '${escapedPathJs}', name: '${escapedNameJs}', isDir: true})">🗑️ 删除</button>
                 ` : `
-                    <button class="btn btn-upload" onclick="event.stopPropagation(); uploadAndGetLink({path: '${escapedPath}', name: '${escapedName}', isDir: false})">⬆️ 上传</button>
-                    <button class="btn btn-delete" onclick="event.stopPropagation(); deleteFile({path: '${escapedPath}', name: '${escapedName}', isDir: false})">🗑️ 删除</button>
+                    <button class="btn btn-upload" onclick="event.stopPropagation(); uploadAndGetLink({path: '${escapedPathJs}', name: '${escapedNameJs}', isDir: false})">⬆️ 上传</button>
+                    <button class="btn btn-delete" onclick="event.stopPropagation(); deleteFile({path: '${escapedPathJs}', name: '${escapedNameJs}', isDir: false})">🗑️ 删除</button>
                 `;
 
                 return `
@@ -757,8 +759,8 @@
                      data-name="${escapedName}"
                      data-is-dir="${isDir}"
                      data-size="${entry.size || 0}">
-                    <div class="file-icon" ${isDir ? `onclick="openDirectory('${escapedPath}', '${escapedName}')"` : ''}>${isDir ? '📁' : '📄'}</div>
-                    <div class="file-info" ${isDir ? `onclick="openDirectory('${escapedPath}', '${escapedName}')"` : ''}>
+                    <div class="file-icon" ${isDir ? `onclick="openDirectory('${escapedPathJs}', '${escapedNameJs}')"` : ''}>${isDir ? '📁' : '📄'}</div>
+                    <div class="file-info" ${isDir ? `onclick="openDirectory('${escapedPathJs}', '${escapedNameJs}')"` : ''}>
                         <div class="file-name">${escapedName}</div>
                         <div class="file-meta">
                             ${isDir ? '文件夹' : formatSize(entry.size)}
@@ -824,6 +826,17 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        // Escape string for use in JavaScript string literals (for onclick attributes)
+        function escapeJs(text) {
+            if (!text) return '';
+            return text
+                .replace(/\\/g, '\\\\')  // Escape backslashes first
+                .replace(/'/g, "\\'")     // Escape single quotes
+                .replace(/"/g, '\\"')     // Escape double quotes
+                .replace(/\n/g, '\\n')    // Escape newlines
+                .replace(/\r/g, '\\r');   // Escape carriage returns
         }
 
         function showError(message) {

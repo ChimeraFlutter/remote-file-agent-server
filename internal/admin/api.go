@@ -143,8 +143,8 @@ func (api *API) HandleDeviceList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get all devices
-	deviceList, err := api.registry.List()
+	// Get only online devices
+	deviceList, err := api.registry.ListOnline()
 	if err != nil {
 		api.logger.Error("Failed to list devices", zap.Error(err))
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)

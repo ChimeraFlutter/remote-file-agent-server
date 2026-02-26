@@ -114,21 +114,25 @@ func (r *Registry) List() ([]*Device, error) {
 
 // ListOnline retrieves all online devices
 func (r *Registry) ListOnline() ([]*Device, error) {
-	devices, err := r.store.ListByStatus(DeviceStatusOnline)
+	// Get all devices from database
+	devices, err := r.store.List()
 	if err != nil {
-		return nil, fmt.Errorf("failed to list online devices: %w", err)
+		return nil, fmt.Errorf("failed to list devices: %w", err)
 	}
 
-	// Update ConnID from in-memory map
+	// Filter to only online devices based on in-memory connections
 	r.mu.RLock()
+	var onlineDevices []*Device
 	for _, device := range devices {
 		if connID, ok := r.connections[device.DeviceID]; ok {
 			device.ConnID = connID
+			device.Status = DeviceStatusOnline // Set status from memory
+			onlineDevices = append(onlineDevices, device)
 		}
 	}
 	r.mu.RUnlock()
 
-	return devices, nil
+	return onlineDevices, nil
 }
 
 // SetConnection associates a WebSocket connection ID with a device
@@ -137,11 +141,8 @@ func (r *Registry) SetConnection(deviceID, connID string) error {
 	r.connections[deviceID] = connID
 	r.mu.Unlock()
 
-	// Update device status to online
-	if err := r.store.UpdateStatus(deviceID, DeviceStatusOnline, time.Now()); err != nil {
-		return fmt.Errorf("failed to update device status: %w", err)
-	}
-
+	// Note: Online status is now determined by in-memory connections map
+	// No need to write to database on every connection
 	return nil
 }
 
@@ -151,11 +152,8 @@ func (r *Registry) RemoveConnection(deviceID string) error {
 	delete(r.connections, deviceID)
 	r.mu.Unlock()
 
-	// Update device status to offline
-	if err := r.store.UpdateStatus(deviceID, DeviceStatusOffline, time.Now()); err != nil {
-		return fmt.Errorf("failed to update device status: %w", err)
-	}
-
+	// Note: Online status is now determined by in-memory connections map
+	// No need to write to database on every disconnection
 	return nil
 }
 
@@ -177,9 +175,9 @@ func (r *Registry) IsOnline(deviceID string) bool {
 
 // UpdateHeartbeat updates the last_seen timestamp for a device
 func (r *Registry) UpdateHeartbeat(deviceID string) error {
-	if err := r.store.UpdateStatus(deviceID, DeviceStatusOnline, time.Now()); err != nil {
-		return fmt.Errorf("failed to update heartbeat: %w", err)
-	}
+	// Heartbeat only updates in-memory state
+	// No need to write to database every 15 seconds
+	// The connection map already tracks online status
 	return nil
 }
 

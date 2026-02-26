@@ -8,39 +8,62 @@ import (
 	"go.uber.org/zap"
 )
 
+// AuditEntry represents a single audit log entry
+type AuditEntry struct {
+	Admin    string
+	Action   string
+	DeviceID string
+	Path     string
+	Result   string
+	ErrorMsg string
+	IP       string
+}
+
 // Logger handles audit logging
 type Logger struct {
-	db     *sql.DB
-	logger *zap.Logger
+	db      *sql.DB
+	logger  *zap.Logger
+	logChan chan AuditEntry
 }
 
 // NewLogger creates a new audit logger
 func NewLogger(db *sql.DB, logger *zap.Logger) *Logger {
-	return &Logger{
-		db:     db,
-		logger: logger,
+	l := &Logger{
+		db:      db,
+		logger:  logger,
+		logChan: make(chan AuditEntry, 1000), // Buffer up to 1000 log entries
+	}
+
+	// Start background worker to write logs
+	go l.worker()
+
+	return l
+}
+
+// worker processes audit log entries from the channel
+func (l *Logger) worker() {
+	for entry := range l.logChan {
+		query := `
+			INSERT INTO audit_logs (timestamp, admin, action, device_id, path, result, error, ip)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`
+
+		timestamp := time.Now().Unix()
+
+		_, err := l.db.Exec(query, timestamp, entry.Admin, entry.Action, entry.DeviceID, entry.Path, entry.Result, entry.ErrorMsg, entry.IP)
+		if err != nil {
+			l.logger.Error("Failed to write audit log",
+				zap.Error(err),
+				zap.String("admin", entry.Admin),
+				zap.String("action", entry.Action),
+			)
+		}
 	}
 }
 
 // Log records an audit log entry
 func (l *Logger) Log(admin, action, deviceID, path, result, errorMsg, ip string) {
-	query := `
-		INSERT INTO audit_logs (timestamp, admin, action, device_id, path, result, error, ip)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`
-
-	timestamp := time.Now().Unix()
-
-	_, err := l.db.Exec(query, timestamp, admin, action, deviceID, path, result, errorMsg, ip)
-	if err != nil {
-		l.logger.Error("Failed to write audit log",
-			zap.Error(err),
-			zap.String("admin", admin),
-			zap.String("action", action),
-		)
-	}
-
-	// Also log to application logger
+	// Log to application logger immediately (non-blocking)
 	l.logger.Info("Audit log",
 		zap.String("admin", admin),
 		zap.String("action", action),
@@ -50,6 +73,23 @@ func (l *Logger) Log(admin, action, deviceID, path, result, errorMsg, ip string)
 		zap.String("error", errorMsg),
 		zap.String("ip", ip),
 	)
+
+	// Send to channel for async processing (non-blocking if buffer is full)
+	select {
+	case l.logChan <- AuditEntry{
+		Admin:    admin,
+		Action:   action,
+		DeviceID: deviceID,
+		Path:     path,
+		Result:   result,
+		ErrorMsg: errorMsg,
+		IP:       ip,
+	}:
+		// Successfully queued
+	default:
+		// Channel full, log warning but don't block
+		l.logger.Warn("Audit log channel full, dropping log entry")
+	}
 }
 
 // GetLogs retrieves audit logs with optional filters

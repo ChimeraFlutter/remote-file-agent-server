@@ -14,6 +14,7 @@ type Config struct {
 	Security  SecurityConfig  `mapstructure:"security"`
 	WebSocket WebSocketConfig `mapstructure:"websocket"`
 	Logging   LoggingConfig   `mapstructure:"logging"`
+	MCP       MCPConfig       `mapstructure:"mcp"`
 }
 
 // ServerConfig holds server-specific configuration
@@ -50,6 +51,14 @@ type LoggingConfig struct {
 	Output string `mapstructure:"output"`
 }
 
+// MCPConfig holds MCP server configuration
+type MCPConfig struct {
+	Enabled               bool   `mapstructure:"enabled"`
+	AuthToken             string `mapstructure:"auth_token"`
+	SessionTimeoutMinutes int    `mapstructure:"session_timeout_minutes"`
+	Endpoint              string `mapstructure:"endpoint"`
+}
+
 // Addr returns the server address in host:port format
 func (s *ServerConfig) Addr() string {
 	return fmt.Sprintf("%s:%d", s.Host, s.Port)
@@ -78,6 +87,11 @@ func (w *WebSocketConfig) PongTimeout() time.Duration {
 // HeartbeatInterval returns the heartbeat interval as a duration
 func (w *WebSocketConfig) HeartbeatInterval() time.Duration {
 	return time.Duration(w.HeartbeatIntervalSeconds) * time.Second
+}
+
+// SessionTimeout returns the MCP session timeout as a duration
+func (m *MCPConfig) SessionTimeout() time.Duration {
+	return time.Duration(m.SessionTimeoutMinutes) * time.Minute
 }
 
 // Load loads configuration from file
@@ -137,6 +151,12 @@ func setDefaults() {
 	// Logging defaults
 	viper.SetDefault("logging.level", "info")
 	viper.SetDefault("logging.output", "stdout")
+
+	// MCP defaults
+	viper.SetDefault("mcp.enabled", false)
+	viper.SetDefault("mcp.auth_token", "")
+	viper.SetDefault("mcp.session_timeout_minutes", 30)
+	viper.SetDefault("mcp.endpoint", "/mcp")
 }
 
 // validate validates the configuration

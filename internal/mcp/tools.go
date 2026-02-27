@@ -17,6 +17,9 @@ import (
 
 // registerTools registers all MCP tools
 func (s *Server) registerTools() {
+	// Register MCP protocol methods
+	s.RegisterTool("tools/list", s.handleToolsList)
+
 	// Register device tools
 	s.RegisterTool("list_devices", s.handleListDevices)
 	s.RegisterTool("select_device", s.handleSelectDevice)
@@ -30,19 +33,119 @@ func (s *Server) registerTools() {
 	s.logger.Info("MCP tools registered", zap.Int("count", len(s.tools)))
 }
 
+// MCP protocol handlers
+
+// handleToolsList returns the list of available tools
+func (s *Server) handleToolsList(ctx context.Context, session *Session, params json.RawMessage) (interface{}, error) {
+	tools := []map[string]interface{}{
+		{
+			"name":        "list_devices",
+			"description": "列出所有在线设备",
+			"inputSchema": map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+		},
+		{
+			"name":        "select_device",
+			"description": "选择要操作的设备",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"device_name": map[string]interface{}{
+						"type":        "string",
+						"description": "设备名称（支持模糊匹配）",
+					},
+					"device_id": map[string]interface{}{
+						"type":        "string",
+						"description": "设备ID",
+					},
+				},
+			},
+		},
+		{
+			"name":        "get_device_status",
+			"description": "获取设备状态",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"device_id": map[string]interface{}{
+						"type":        "string",
+						"description": "设备ID（可选）",
+					},
+				},
+			},
+		},
+		{
+			"name":        "list_files",
+			"description": "列出目录内容",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"path": map[string]interface{}{
+						"type":        "string",
+						"description": "目录路径",
+					},
+				},
+				"required": []string{"path"},
+			},
+		},
+		{
+			"name":        "check_path",
+			"description": "检查路径是否存在",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"path": map[string]interface{}{
+						"type":        "string",
+						"description": "文件或目录路径",
+					},
+				},
+				"required": []string{"path"},
+			},
+		},
+		{
+			"name":        "get_download_link",
+			"description": "获取下载链接",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"paths": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]string{"type": "string"},
+						"description": "文件路径列表",
+					},
+					"description": map[string]interface{}{
+						"type":        "string",
+						"description": "描述（可选）",
+					},
+				},
+				"required": []string{"paths"},
+			},
+		},
+	}
+
+	return map[string]interface{}{
+		"tools": tools,
+	}, nil
+}
+
 // Device tool handlers
 
 func (s *Server) handleListDevices(ctx context.Context, session *Session, params json.RawMessage) (interface{}, error) {
-	devices := s.registry.ListOnline()
+	devices, err := s.registry.ListOnline()
+	if err != nil {
+		return nil, NewMCPError(ErrorCodeInternalError, "Failed to list devices", nil)
+	}
 
 	result := make([]DeviceInfo, 0, len(devices))
 	for _, device := range devices {
 		result = append(result, DeviceInfo{
 			DeviceID:     device.DeviceID,
 			DeviceName:   device.DeviceName,
-			Platform:     device.Platform,
+			Platform:     string(device.Platform),
 			IP:           device.IP,
-			AllowedRoots: device.AllowedRoots,
+			AllowedRoots: rootsToStrings(device.AllowedRoots),
 			Status:       string(device.Status),
 			LastSeen:     device.LastSeen.Format("2006-01-02T15:04:05Z07:00"),
 		})
@@ -92,9 +195,9 @@ func (s *Server) handleSelectDevice(ctx context.Context, session *Session, param
 	return DeviceInfo{
 		DeviceID:     device.DeviceID,
 		DeviceName:   device.DeviceName,
-		Platform:     device.Platform,
+		Platform:     string(device.Platform),
 		IP:           device.IP,
-		AllowedRoots: device.AllowedRoots,
+		AllowedRoots: rootsToStrings(device.AllowedRoots),
 		Status:       string(device.Status),
 		LastSeen:     device.LastSeen.Format("2006-01-02T15:04:05Z07:00"),
 	}, nil
@@ -130,7 +233,10 @@ func (s *Server) handleGetDeviceStatus(ctx context.Context, session *Session, pa
 }
 
 func (s *Server) findDeviceByName(name string) *devices.Device {
-	devices := s.registry.ListOnline()
+	devices, err := s.registry.ListOnline()
+	if err != nil {
+		return nil
+	}
 
 	for _, device := range devices {
 		if device.DeviceName == name {
@@ -167,7 +273,7 @@ func (s *Server) handleListFiles(ctx context.Context, session *Session, params j
 		return nil, NewMCPError(ErrorCodeInvalidParams, "No device selected", nil)
 	}
 
-	if !s.isPathAllowed(p.Path, device.AllowedRoots) {
+	if !s.isPathAllowed(p.Path, rootsToStrings(device.AllowedRoots)) {
 		return nil, ErrPathNotAllowed(p.Path)
 	}
 
@@ -177,7 +283,7 @@ func (s *Server) handleListFiles(ctx context.Context, session *Session, params j
 	rpcCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	resp, err := s.rpcManager.Call(rpcCtx, device.DeviceID, "list", reqPayload)
+	resp, err := s.rpcManager.Call(rpcCtx, device.DeviceID, "list", reqPayload, 10*time.Second)
 	if err != nil {
 		s.logger.Error("List RPC failed", zap.Error(err))
 		return nil, ErrRPCTimeout(10)
@@ -217,20 +323,20 @@ func (s *Server) handleCheckPath(ctx context.Context, session *Session, params j
 		return nil, NewMCPError(ErrorCodeInvalidParams, "No device selected", nil)
 	}
 
-	if !s.isPathAllowed(p.Path, device.AllowedRoots) {
+	if !s.isPathAllowed(p.Path, rootsToStrings(device.AllowedRoots)) {
 		return nil, ErrPathNotAllowed(p.Path)
 	}
 
 	fileInfoReq := map[string]string{"path": p.Path}
 	reqPayload, _ := json.Marshal(fileInfoReq)
 
-	rpcCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	rpcCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	resp, err := s.rpcManager.Call(rpcCtx, device.DeviceID, "file_info", reqPayload)
+	resp, err := s.rpcManager.Call(rpcCtx, device.DeviceID, "file_info", reqPayload, 30*time.Second)
 	if err != nil {
 		s.logger.Error("file_info RPC failed", zap.Error(err))
-		return nil, ErrRPCTimeout(10)
+		return nil, ErrRPCTimeout(30)
 	}
 
 	if !resp.Success {
@@ -263,7 +369,7 @@ func (s *Server) handleGetDownloadLink(ctx context.Context, session *Session, pa
 	}
 
 	for _, path := range p.Paths {
-		if !s.isPathAllowed(path, device.AllowedRoots) {
+		if !s.isPathAllowed(path, rootsToStrings(device.AllowedRoots)) {
 			return nil, ErrPathNotAllowed(path)
 		}
 	}
@@ -345,7 +451,7 @@ func (s *Server) getFileInfo(ctx context.Context, deviceID, path string) (*rpc.F
 	rpcCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	resp, err := s.rpcManager.Call(rpcCtx, deviceID, "file_info", reqPayload)
+	resp, err := s.rpcManager.Call(rpcCtx, deviceID, "file_info", reqPayload, 10*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +480,7 @@ func (s *Server) uploadFile(ctx context.Context, deviceID, path string) (string,
 	rpcCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	resp, err := s.rpcManager.Call(rpcCtx, deviceID, "upload", reqPayload)
+	resp, err := s.rpcManager.Call(rpcCtx, deviceID, "upload", reqPayload, 5*time.Minute)
 	if err != nil {
 		return "", 0, fmt.Errorf("upload request failed: %w", err)
 	}
@@ -409,7 +515,7 @@ func (s *Server) compressAndUpload(ctx context.Context, deviceID string, paths [
 	rpcCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	resp, err := s.rpcManager.Call(rpcCtx, deviceID, "zip", reqPayload)
+	resp, err := s.rpcManager.Call(rpcCtx, deviceID, "zip", reqPayload, 5*time.Minute)
 	if err != nil {
 		return "", 0, fmt.Errorf("zip request failed: %w", err)
 	}
@@ -465,4 +571,13 @@ func (s *Server) isPathAllowed(path string, allowedRoots []string) bool {
 	}
 
 	return false
+}
+
+// rootsToStrings converts []devices.Root to []string by extracting AbsPath
+func rootsToStrings(roots []devices.Root) []string {
+	result := make([]string, len(roots))
+	for i, root := range roots {
+		result[i] = root.AbsPath
+	}
+	return result
 }

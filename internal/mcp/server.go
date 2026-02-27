@@ -147,7 +147,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		Result:  result,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Session-ID", sessionID)
 	json.NewEncoder(w).Encode(resp)
 }
@@ -202,7 +202,7 @@ func (s *Server) writeError(w http.ResponseWriter, id interface{}, err *MCPError
 		Error:   err,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK) // JSON-RPC errors use 200 OK
 	json.NewEncoder(w).Encode(resp)
 }

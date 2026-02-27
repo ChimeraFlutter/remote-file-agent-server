@@ -47,8 +47,10 @@ type WebSocketConfig struct {
 
 // LoggingConfig holds logging-specific configuration
 type LoggingConfig struct {
-	Level  string `mapstructure:"level"`
-	Output string `mapstructure:"output"`
+	Level     string `mapstructure:"level"`
+	Output    string `mapstructure:"output"`
+	LogDir    string `mapstructure:"log_dir"`     // Directory for log files
+	UseRotate bool   `mapstructure:"use_rotate"`  // Enable time-based log rotation
 }
 
 // MCPConfig holds MCP server configuration
@@ -151,6 +153,8 @@ func setDefaults() {
 	// Logging defaults
 	viper.SetDefault("logging.level", "info")
 	viper.SetDefault("logging.output", "stdout")
+	viper.SetDefault("logging.log_dir", "")
+	viper.SetDefault("logging.use_rotate", false)
 
 	// MCP defaults
 	viper.SetDefault("mcp.enabled", false)

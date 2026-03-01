@@ -15,38 +15,38 @@ type ZipService struct {
 	storage    *Storage
 	rpcManager *rpc.Manager
 	logger     *zap.Logger
+	serverAddr string
 }
 
 // NewZipService creates a new zip service
-func NewZipService(storage *Storage, rpcManager *rpc.Manager, logger *zap.Logger) *ZipService {
+func NewZipService(storage *Storage, rpcManager *rpc.Manager, logger *zap.Logger, serverAddr string) *ZipService {
 	return &ZipService{
 		storage:    storage,
 		rpcManager: rpcManager,
 		logger:     logger,
+		serverAddr: serverAddr,
 	}
 }
 
-// RequestZip sends a zip request to a device and waits for completion
+// RequestZip sends a compress request to a device and waits for completion
 func (zs *ZipService) RequestZip(ctx context.Context, deviceID string, paths []string) (*UploadedObject, error) {
-	// Generate zip ID
-	zipID := fmt.Sprintf("zip-%d", time.Now().Unix())
-
-	// Create zip request
-	zipReq := rpc.ZipRequest{
-		Paths:  paths,
-		ZipID:  zipID,
-		ZipDir: "/tmp", // Temporary directory on device
+	if len(paths) != 1 {
+		return nil, fmt.Errorf("compress only supports single path")
 	}
 
-	zs.logger.Info("Requesting zip creation",
+	// Create compress request (compatible with Flutter agent)
+	compressReq := map[string]string{
+		"path": paths[0],
+	}
+
+	zs.logger.Info("Requesting compress operation",
 		zap.String("device_id", deviceID),
-		zap.String("zip_id", zipID),
 		zap.Strings("paths", paths))
 
-	// Send RPC request to device
-	resp, err := zs.rpcManager.Call(ctx, deviceID, "zip", zipReq, 5*time.Minute)
+	// Send RPC request to device using compress method instead of zip
+	resp, err := zs.rpcManager.Call(ctx, deviceID, "compress", compressReq, 5*time.Minute)
 	if err != nil {
-		return nil, fmt.Errorf("failed to request zip: %w", err)
+		return nil, fmt.Errorf("failed to request compress: %w", err)
 	}
 
 	if !resp.Success {
@@ -54,34 +54,44 @@ func (zs *ZipService) RequestZip(ctx context.Context, deviceID string, paths []s
 		if resp.Error != nil {
 			errMsg = resp.Error.Message
 		}
-		return nil, fmt.Errorf("zip request failed: %s", errMsg)
+		return nil, fmt.Errorf("compress request failed: %s", errMsg)
 	}
 
-	// Parse zip response
-	var zipResp rpc.ZipResponse
-	if err := json.Unmarshal(resp.Payload, &zipResp); err != nil {
-		return nil, fmt.Errorf("failed to parse zip response: %w", err)
+	// Parse compress response
+	var compressResp map[string]interface{}
+	if err := json.Unmarshal(resp.Payload, &compressResp); err != nil {
+		return nil, fmt.Errorf("failed to parse compress response: %w", err)
 	}
 
-	if !zipResp.Success {
-		return nil, fmt.Errorf("zip creation failed: %s", zipResp.Message)
+	// Extract compressed file info
+	zipPath, ok := compressResp["zip_path"].(string)
+	if !ok {
+		return nil, fmt.Errorf("compress response missing zip_path")
 	}
 
-	zs.logger.Info("Zip created successfully",
+	zipName, ok := compressResp["zip_name"].(string)
+	if !ok {
+		zipName = "compressed.zip"
+	}
+
+	zipSize, ok := compressResp["size"].(float64) // JSON numbers are float64
+	if !ok {
+		return nil, fmt.Errorf("compress response missing size")
+	}
+
+	zs.logger.Info("Compress completed successfully",
 		zap.String("device_id", deviceID),
-		zap.String("zip_id", zipResp.ZipID),
-		zap.String("zip_path", zipResp.ZipPath),
-		zap.Int64("zip_size", zipResp.ZipSize),
-		zap.String("sha256", zipResp.SHA256))
+		zap.String("zip_path", zipPath),
+		zap.String("zip_name", zipName),
+		zap.Int64("zip_size", int64(zipSize)))
 
-	// Now trigger upload of the zip file
+	// Now trigger upload of the compressed file
 	// Initialize upload in database
 	initReq := &InitUploadRequest{
 		DeviceID:   deviceID,
-		SourcePath: zipResp.ZipPath,
-		FileName:   fmt.Sprintf("%s.zip", zipID),
-		FileSize:   zipResp.ZipSize,
-		SHA256:     zipResp.SHA256,
+		SourcePath: zipPath,
+		FileName:   zipName,
+		FileSize:   int64(zipSize),
 	}
 
 	obj, err := zs.storage.InitUpload(initReq)
@@ -89,11 +99,14 @@ func (zs *ZipService) RequestZip(ctx context.Context, deviceID string, paths []s
 		return nil, fmt.Errorf("failed to initialize upload: %w", err)
 	}
 
-	// Send upload request to device
+	// Generate upload URL
+	uploadURL := fmt.Sprintf("http://%s/api/objects/upload/%s", zs.serverAddr, obj.ObjectID)
+
+	// Send upload request to device with upload_url
 	uploadReq := rpc.UploadRequest{
-		ObjectID: obj.ObjectID,
-		Path:     zipResp.ZipPath,
-		SHA256:   zipResp.SHA256,
+		ObjectID:  obj.ObjectID,
+		Path:      zipPath,
+		UploadURL: uploadURL,
 	}
 
 	uploadResp, err := zs.rpcManager.Call(ctx, deviceID, "upload", uploadReq, 30*time.Minute)
@@ -111,10 +124,9 @@ func (zs *ZipService) RequestZip(ctx context.Context, deviceID string, paths []s
 		return nil, fmt.Errorf("upload request failed: %s", errMsg)
 	}
 
-	zs.logger.Info("Zip upload initiated",
+	zs.logger.Info("Compressed file upload initiated",
 		zap.String("device_id", deviceID),
-		zap.String("object_id", obj.ObjectID),
-		zap.String("zip_id", zipID))
+		zap.String("object_id", obj.ObjectID))
 
 	return obj, nil
 }

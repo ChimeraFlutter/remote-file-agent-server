@@ -194,8 +194,8 @@ func (api *API) HandleGenerateDownloadToken(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Generate token (valid for 10 minutes)
-	token, err := api.tokenManager.GenerateToken(objectID, 10*time.Minute)
+	// Generate token (valid for 24 hours)
+	token, err := api.tokenManager.GenerateToken(objectID, 24*time.Hour)
 	if err != nil {
 		api.logger.Error("Failed to generate token", zap.Error(err))
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
@@ -227,29 +227,38 @@ func (api *API) HandleGenerateDownloadToken(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// HandleDownload handles file download requests
+// HandleDownload handles file download requests by object ID
 func (api *API) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, `{"error":"method_not_allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Get token from URL
 	vars := mux.Vars(r)
-	tokenStr := vars["token"]
 
-	// Validate token
-	token, err := api.tokenManager.ValidateToken(tokenStr)
-	if err != nil {
-		api.logger.Warn("Invalid download token", zap.String("token", tokenStr), zap.Error(err))
-		http.Error(w, `{"error":"invalid_token"}`, http.StatusForbidden)
+	// Get object ID from path (either {token} or {object_id} parameter)
+	var objectID string
+	if tokenStr, ok := vars["token"]; ok {
+		// Validate token and get object ID
+		token, err := api.tokenManager.ValidateToken(tokenStr)
+		if err != nil {
+			api.logger.Warn("Invalid or expired token", zap.String("token", tokenStr), zap.Error(err))
+			http.Error(w, `{"error":"invalid_token"}`, http.StatusUnauthorized)
+			return
+		}
+		objectID = token.ObjectID
+	} else if objID, ok := vars["object_id"]; ok {
+		objectID = objID
+	} else {
+		api.logger.Warn("Missing object identifier in download request")
+		http.Error(w, `{"error":"missing_object_id"}`, http.StatusBadRequest)
 		return
 	}
 
 	// Get object
-	obj, err := api.storage.GetObject(token.ObjectID)
+	obj, err := api.storage.GetObject(objectID)
 	if err != nil {
-		api.logger.Error("Object not found", zap.String("object_id", token.ObjectID))
+		api.logger.Warn("Object not found", zap.String("object_id", objectID))
 		http.Error(w, `{"error":"object_not_found"}`, http.StatusNotFound)
 		return
 	}

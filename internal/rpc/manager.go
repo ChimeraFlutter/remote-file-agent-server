@@ -65,10 +65,19 @@ func (m *Manager) Call(ctx context.Context, deviceID, method string, payload int
 	// Generate request ID
 	reqID := uuid.New().String()
 
-	// Marshal payload
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
+	// Marshal payload - if already json.RawMessage/[]byte, use directly to avoid Base64 encoding
+	var payloadBytes json.RawMessage
+	switch v := payload.(type) {
+	case json.RawMessage:
+		payloadBytes = v
+	case []byte:
+		payloadBytes = json.RawMessage(v)
+	default:
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		payloadBytes = json.RawMessage(b)
 	}
 
 	// Create context with timeout
@@ -151,11 +160,11 @@ func (m *Manager) sendToDevice(deviceID, reqID, method string, payload json.RawM
 
 	// Type assert to ws.Manager
 	type Envelope struct {
-		Type      string          `json:"type"`
-		ReqID     string          `json:"req_id"`
-		Timestamp int64           `json:"ts"`
-		DeviceID  string          `json:"device_id"`
-		Payload   json.RawMessage `json:"payload"`
+		Type      string      `json:"type"`
+		ReqID     string      `json:"req_id"`
+		Timestamp int64       `json:"ts"`
+		DeviceID  string      `json:"device_id"`
+		Payload   interface{} `json:"payload"`
 	}
 
 	// Create message type based on method
@@ -173,13 +182,21 @@ func (m *Manager) sendToDevice(deviceID, reqID, method string, payload json.RawM
 		messageType = method + "_req"
 	}
 
+	// Unmarshal payload bytes to interface{} to avoid Base64 encoding
+	var payloadInterface interface{}
+	if len(payload) > 0 {
+		if err := json.Unmarshal(payload, &payloadInterface); err != nil {
+			return err
+		}
+	}
+
 	// Create envelope
 	envelope := &Envelope{
 		Type:      messageType,
 		ReqID:     reqID,
 		Timestamp: time.Now().Unix(),
 		DeviceID:  deviceID,
-		Payload:   payload,
+		Payload:   payloadInterface,
 	}
 
 	// Call SendToDevice using reflection-free approach

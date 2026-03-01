@@ -79,9 +79,10 @@ type ZipResponse struct {
 
 // UploadRequest represents a file upload request
 type UploadRequest struct {
-	ObjectID string `json:"object_id"`
-	Path     string `json:"path"`
-	SHA256   string `json:"sha256"`
+	ObjectID  string `json:"object_id"`
+	Path      string `json:"path"`
+	UploadURL string `json:"upload_url"` // HTTP URL for direct upload
+	SHA256    string `json:"sha256"`
 }
 
 // UploadResponse represents a file upload response

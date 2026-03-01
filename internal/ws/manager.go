@@ -520,16 +520,23 @@ func (m *Manager) SendToDevice(deviceID string, envelope interface{}) error {
 	case *Envelope:
 		return conn.sendEnvelope(env)
 	default:
-		// Marshal and unmarshal to convert to Envelope
+		// For non-Envelope types, marshal to JSON and send directly
+		// This avoids the Base64 encoding issue with json.RawMessage
 		data, err := json.Marshal(envelope)
 		if err != nil {
 			return fmt.Errorf("failed to marshal envelope: %w", err)
 		}
-		var wsEnvelope Envelope
-		if err := json.Unmarshal(data, &wsEnvelope); err != nil {
-			return fmt.Errorf("failed to unmarshal envelope: %w", err)
+
+		// Send the JSON bytes directly through WebSocket
+		conn.mu.Lock()
+		defer conn.mu.Unlock()
+
+		select {
+		case conn.send <- data:
+			return nil
+		default:
+			return fmt.Errorf("send buffer full")
 		}
-		return conn.sendEnvelope(&wsEnvelope)
 	}
 }
 

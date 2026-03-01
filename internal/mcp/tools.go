@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/remote-file-manager/server/internal/devices"
 	"github.com/remote-file-manager/server/internal/objects"
 	"github.com/remote-file-manager/server/internal/rpc"
@@ -42,8 +41,13 @@ func (s *Server) handleToolsList(ctx context.Context, session *Session, params j
 			"name":        "list_devices",
 			"description": "列出所有在线设备",
 			"inputSchema": map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{},
+				"type": "object",
+				"properties": map[string]interface{}{
+					"device_name_filter": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional device name filter (fuzzy matching, e.g., '扬州')",
+					},
+				},
 			},
 		},
 		{
@@ -133,6 +137,16 @@ func (s *Server) handleToolsList(ctx context.Context, session *Session, params j
 // Device tool handlers
 
 func (s *Server) handleListDevices(ctx context.Context, session *Session, params json.RawMessage) (interface{}, error) {
+	// Parse parameters to get optional filter
+	var p struct {
+		DeviceNameFilter string `json:"device_name_filter"`
+	}
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, NewMCPError(ErrorCodeInvalidParams, "Invalid parameters", nil)
+		}
+	}
+
 	devices, err := s.registry.ListOnline()
 	if err != nil {
 		return nil, NewMCPError(ErrorCodeInternalError, "Failed to list devices", nil)
@@ -140,6 +154,15 @@ func (s *Server) handleListDevices(ctx context.Context, session *Session, params
 
 	result := make([]DeviceInfo, 0, len(devices))
 	for _, device := range devices {
+		// Apply filter if provided
+		if p.DeviceNameFilter != "" {
+			filterLower := strings.ToLower(p.DeviceNameFilter)
+			deviceNameLower := strings.ToLower(device.DeviceName)
+			if !strings.Contains(deviceNameLower, filterLower) {
+				continue
+			}
+		}
+
 		result = append(result, DeviceInfo{
 			DeviceID:     device.DeviceID,
 			DeviceName:   device.DeviceName,
@@ -151,7 +174,9 @@ func (s *Server) handleListDevices(ctx context.Context, session *Session, params
 		})
 	}
 
-	s.logger.Info("Listed devices", zap.Int("count", len(result)))
+	s.logger.Info("Listed devices",
+		zap.Int("count", len(result)),
+		zap.String("filter", p.DeviceNameFilter))
 	return result, nil
 }
 
@@ -397,6 +422,21 @@ func (s *Server) handleGetDownloadLink(ctx context.Context, session *Session, pa
 			objectID, fileSize, err = s.uploadFile(ctx, device.DeviceID, p.Paths[0])
 			compressed = false
 		} else {
+			// Check if directory is empty before compressing
+			isEmpty, checkErr := s.isDirectoryEmpty(ctx, device.DeviceID, p.Paths[0])
+			if checkErr == nil && isEmpty {
+				s.logger.Info("Directory is empty, skipping compression", zap.String("path", p.Paths[0]))
+				// Return empty file size to signal that directory is empty
+				return DownloadLinkResponse{
+					DownloadURL: "",
+					FileName:    fmt.Sprintf("%s-%s.zip", device.DeviceName, p.Description),
+					FileSize:    0,
+					ExpiresAt:   time.Now().Add(10 * time.Minute).Format("2006-01-02T15:04:05Z07:00"),
+					Paths:       p.Paths,
+					Compressed:  true,
+				}, nil
+			}
+			// Directory has files, proceed with compression
 			objectID, fileSize, err = s.compressAndUpload(ctx, device.DeviceID, p.Paths)
 			compressed = true
 		}
@@ -410,7 +450,7 @@ func (s *Server) handleGetDownloadLink(ctx context.Context, session *Session, pa
 		return nil, NewMCPError(ErrorCodeInternalError, err.Error(), nil)
 	}
 
-	token, err := s.tokenManager.GenerateToken(objectID, 10*time.Minute)
+	token, err := s.tokenManager.GenerateToken(objectID, 24*time.Hour)
 	if err != nil {
 		return nil, NewMCPError(ErrorCodeInternalError, "Failed to generate token", nil)
 	}
@@ -423,6 +463,14 @@ func (s *Server) handleGetDownloadLink(ctx context.Context, session *Session, pa
 	}
 	if compressed {
 		fileName += ".zip"
+	} else {
+		// For non-compressed files, preserve the original file extension
+		if len(p.Paths) == 1 {
+			ext := filepath.Ext(p.Paths[0])
+			if ext != "" {
+				fileName += ext
+			}
+		}
 	}
 
 	result := DownloadLinkResponse{
@@ -468,73 +516,161 @@ func (s *Server) getFileInfo(ctx context.Context, deviceID, path string) (*rpc.F
 	return &fileInfo, nil
 }
 
-func (s *Server) uploadFile(ctx context.Context, deviceID, path string) (string, int64, error) {
-	objectID := uuid.New().String()
+// isDirectoryEmpty checks if a directory has any files (recursively)
+func (s *Server) isDirectoryEmpty(ctx context.Context, deviceID, path string) (bool, error) {
+	listReq := rpc.ListRequest{Path: path}
+	reqPayload, _ := json.Marshal(listReq)
 
+	rpcCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	resp, err := s.rpcManager.Call(rpcCtx, deviceID, "list", reqPayload, 10*time.Second)
+	if err != nil {
+		// If list fails, assume directory is not empty to be safe
+		s.logger.Warn("Failed to list directory, assuming not empty", zap.String("path", path), zap.Error(err))
+		return false, err
+	}
+
+	if !resp.Success {
+		// If list fails, assume directory is not empty to be safe
+		s.logger.Warn("List RPC failed, assuming directory not empty", zap.String("path", path))
+		return false, fmt.Errorf("list failed: %v", resp.Error)
+	}
+
+	var listResp rpc.ListResponse
+	if err := json.Unmarshal(resp.Payload, &listResp); err != nil {
+		// If parsing fails, assume directory is not empty to be safe
+		s.logger.Warn("Failed to parse list response, assuming not empty", zap.String("path", path), zap.Error(err))
+		return false, err
+	}
+
+	// Directory is empty if no entries or only empty subdirectories
+	if len(listResp.Entries) == 0 {
+		return true, nil
+	}
+
+	// Check if there are any non-directory entries (files)
+	for _, entry := range listResp.Entries {
+		if !entry.IsDir {
+			// Found a file, directory is not empty
+			return false, nil
+		}
+		// For directories, recursively check if they contain files
+		isEmpty, err := s.isDirectoryEmpty(ctx, deviceID, entry.Path)
+		if err != nil {
+			// If recursive check fails, assume directory is not empty to be safe
+			s.logger.Warn("Failed to recursively check subdirectory, assuming not empty",
+				zap.String("path", entry.Path), zap.Error(err))
+			return false, err
+		}
+		if !isEmpty {
+			// Subdirectory has files
+			return false, nil
+		}
+	}
+
+	// All entries are empty directories
+	return true, nil
+}
+
+func (s *Server) uploadFile(ctx context.Context, deviceID, path string) (string, int64, error) {
+	// Step 1: Get file info from device
+	fileInfo, err := s.getFileInfo(ctx, deviceID, path)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to get file info: %w", err)
+	}
+
+	// Step 2: Initialize upload in database
+	initReq := &objects.InitUploadRequest{
+		DeviceID:   deviceID,
+		SourcePath: path,
+		FileName:   fileInfo.Name,
+		FileSize:   fileInfo.Size,
+		SHA256:     "", // SHA256 will be calculated during upload
+	}
+
+	obj, err := s.storage.InitUpload(initReq)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to initialize upload: %w", err)
+	}
+
+	// Step 3: Generate upload URL
+	uploadURL := fmt.Sprintf("http://%s/api/objects/upload/%s", s.serverAddr, obj.ObjectID)
+
+	// Step 4: Send upload request to device with upload_url
 	uploadReq := rpc.UploadRequest{
-		ObjectID: objectID,
-		Path:     path,
+		ObjectID:  obj.ObjectID,
+		Path:      path,
+		UploadURL: uploadURL,
+		SHA256:    "", // SHA256 will be calculated during upload
 	}
 	reqPayload, _ := json.Marshal(uploadReq)
 
-	rpcCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	rpcCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	resp, err := s.rpcManager.Call(rpcCtx, deviceID, "upload", reqPayload, 5*time.Minute)
+	resp, err := s.rpcManager.Call(rpcCtx, deviceID, "upload", reqPayload, 10*time.Minute)
 	if err != nil {
+		s.storage.UpdateObjectStatus(obj.ObjectID, objects.StatusFailed)
 		return "", 0, fmt.Errorf("upload request failed: %w", err)
 	}
 
 	if !resp.Success {
+		s.storage.UpdateObjectStatus(obj.ObjectID, objects.StatusFailed)
 		return "", 0, fmt.Errorf("upload failed: %v", resp.Error)
 	}
 
-	var uploadResp rpc.UploadResponse
-	if err := json.Unmarshal(resp.Payload, &uploadResp); err != nil {
-		return "", 0, fmt.Errorf("failed to parse upload response: %w", err)
-	}
-
-	obj, err := s.waitForObjectCompletion(objectID, 5*time.Minute)
+	// Step 5: Wait for upload completion
+	completedObj, err := s.waitForObjectCompletion(obj.ObjectID, 10*time.Minute)
 	if err != nil {
 		return "", 0, err
 	}
 
-	return objectID, obj.FileSize, nil
+	return obj.ObjectID, completedObj.FileSize, nil
 }
 
 func (s *Server) compressAndUpload(ctx context.Context, deviceID string, paths []string) (string, int64, error) {
-	zipID := uuid.New().String()
-
-	zipReq := rpc.ZipRequest{
-		Paths:  paths,
-		ZipID:  zipID,
-		ZipDir: "/tmp",
+	if len(paths) != 1 {
+		return "", 0, fmt.Errorf("compress only supports single path")
 	}
-	reqPayload, _ := json.Marshal(zipReq)
+
+	// Use compress method instead of zip (compatible with Flutter agent)
+	compressReq := map[string]string{
+		"path": paths[0],
+	}
+	reqPayload, _ := json.Marshal(compressReq)
 
 	rpcCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	resp, err := s.rpcManager.Call(rpcCtx, deviceID, "zip", reqPayload, 5*time.Minute)
+	// Call compress instead of zip
+	resp, err := s.rpcManager.Call(rpcCtx, deviceID, "compress", reqPayload, 5*time.Minute)
 	if err != nil {
-		return "", 0, fmt.Errorf("zip request failed: %w", err)
+		return "", 0, fmt.Errorf("compress request failed: %w", err)
 	}
 
 	if !resp.Success {
-		return "", 0, fmt.Errorf("zip failed: %v", resp.Error)
+		return "", 0, fmt.Errorf("compress failed: %v", resp.Error)
 	}
 
-	var zipResp rpc.ZipResponse
-	if err := json.Unmarshal(resp.Payload, &zipResp); err != nil {
-		return "", 0, fmt.Errorf("failed to parse zip response: %w", err)
+	var compressResp map[string]interface{}
+	if err := json.Unmarshal(resp.Payload, &compressResp); err != nil {
+		return "", 0, fmt.Errorf("failed to parse compress response: %w", err)
 	}
 
-	obj, err := s.waitForObjectCompletion(zipID, 5*time.Minute)
+	// Get compressed file path
+	compressedPath, ok := compressResp["zip_path"].(string)
+	if !ok {
+		return "", 0, fmt.Errorf("compress response missing zip_path")
+	}
+
+	// Upload the compressed file
+	objectID, fileSize, err := s.uploadFile(ctx, deviceID, compressedPath)
 	if err != nil {
 		return "", 0, err
 	}
 
-	return zipID, obj.FileSize, nil
+	return objectID, fileSize, nil
 }
 
 func (s *Server) waitForObjectCompletion(objectID string, timeout time.Duration) (*objects.UploadedObject, error) {

@@ -91,7 +91,7 @@ func (m *AdminWSManager) HandleConnection(w http.ResponseWriter, r *http.Request
 
 // sendDeviceList sends the current device list to a connection
 func (m *AdminWSManager) sendDeviceList(conn *AdminConnection) {
-	deviceList, err := m.registry.List()
+	deviceList, err := m.registry.ListOnline()
 	if err != nil {
 		log.Printf("Failed to get device list: %v", err)
 		return
@@ -143,7 +143,7 @@ func (m *AdminWSManager) BroadcastDeviceUpdate(device *devices.Device, event str
 
 // BroadcastDeviceList broadcasts the full device list to all admin connections
 func (m *AdminWSManager) BroadcastDeviceList() {
-	deviceList, err := m.registry.List()
+	deviceList, err := m.registry.ListOnline()
 	if err != nil {
 		log.Printf("Failed to get device list: %v", err)
 		return
